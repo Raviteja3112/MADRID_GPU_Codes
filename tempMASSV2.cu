@@ -1,136 +1,77 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <cuda_runtime.h>
 
-#define ROWS 5
-#define QUERY_LENGTH 5
-#define DATA_SIZE 10
-
-// Define a struct to hold all the temporary arrays with fixed sizes
-typedef struct {
-    double *x_less_than_m;           // Size: m - 1
-    double *divider;                 // Size: m - 1
-    double *cumsum_;                 // Size: m - 1
-    double *square_sum_less_than_m; // Size: m - 1
-    double *mean_less_than_m;        // Size: m - 1
-    double *std_less_than_m;         // Size: m - 1
-    double *windows;                 // Size: (n - m + 1) * m
-    double *mean_greater_than_m;    // Size: n - m + 1
-    double *std_greater_than_m;     // Size: n - m + 1
-    double *meanx;                   // Size: n
-    double *sigmax;                  // Size: n
-    double *y;                       // Size: n
-    double *X;                       // Size: n
-    double *Y;                       // Size: n
-    double *Z;                       // Size: n
-    double *z;                       // Size: n
-} TempArrays;
-
-// Function to allocate memory for the struct
-TempArrays* allocate_temp_arrays(int m, int n) {
-    TempArrays *temp = (TempArrays*)malloc(sizeof(TempArrays));
-    if (!temp) {
-        perror("Failed to allocate memory for TempArrays");
-        exit(EXIT_FAILURE);
-    }
-
-    temp->x_less_than_m = (double*)malloc((m - 1) * sizeof(double));
-    temp->divider = (double*)malloc((m - 1) * sizeof(double));
-    temp->cumsum_ = (double*)malloc((m - 1) * sizeof(double));
-    temp->square_sum_less_than_m = (double*)malloc((m - 1) * sizeof(double));
-    temp->mean_less_than_m = (double*)malloc((m - 1) * sizeof(double));
-    temp->std_less_than_m = (double*)malloc((m - 1) * sizeof(double));
-    temp->windows = (double*)malloc((n - m + 1) * m * sizeof(double));
-    temp->mean_greater_than_m = (double*)malloc((n - m + 1) * sizeof(double));
-    temp->std_greater_than_m = (double*)malloc((n - m + 1) * sizeof(double));
-    temp->meanx = (double*)malloc(n * sizeof(double));
-    temp->sigmax = (double*)malloc(n * sizeof(double));
-    temp->y = (double*)malloc(n * sizeof(double));
-    temp->X = (double*)malloc(n * sizeof(double));
-    temp->Y = (double*)malloc(n * sizeof(double));
-    temp->Z = (double*)malloc(n * sizeof(double));
-    temp->z = (double*)malloc(n * sizeof(double));
-
-    return temp;
-}
-
-// Function to free the allocated memory
-void free_temp_arrays(TempArrays *temp) {
-    free(temp->x_less_than_m);
-    free(temp->divider);
-    free(temp->cumsum_);
-    free(temp->square_sum_less_than_m);
-    free(temp->mean_less_than_m);
-    free(temp->std_less_than_m);
-    free(temp->windows);
-    free(temp->mean_greater_than_m);
-    free(temp->std_greater_than_m);
-    free(temp->meanx);
-    free(temp->sigmax);
-    free(temp->y);
-    free(temp->X);
-    free(temp->Y);
-    free(temp->Z);
-    free(temp->z);
-    free(temp);
-}
-
-void print_array(double *array, int length, const char *name) {
-    printf("%s:\n", name);
-    for (int i = 0; i < length; i++) {
-        printf("%f ", array[i]);
-    }
-    printf("\n");
-}
+#define N 3
+#define NUM_INSTANCES 100
 
 
-void print_temp_arrays(TempArrays *temp, int m, int n) {
-    // Print each array with a descriptive name
-    print_array(temp->x_less_than_m, m - 1, "x_less_than_m");
-    print_array(temp->divider, m - 1, "divider");
-    print_array(temp->cumsum_, m - 1, "cumsum_");
-    print_array(temp->square_sum_less_than_m, m - 1, "square_sum_less_than_m");
-    print_array(temp->mean_less_than_m, m - 1, "mean_less_than_m");
-    print_array(temp->std_less_than_m, m - 1, "std_less_than_m");
-    print_array(temp->mean_greater_than_m, n - m + 1, "mean_greater_than_m");
-    print_array(temp->std_greater_than_m, n - m + 1, "std_greater_than_m");
-    print_array(temp->meanx, n, "meanx");
-    print_array(temp->sigmax, n, "sigmax");
-    print_array(temp->y, n, "y");
-    print_array(temp->X, n, "X");
-    print_array(temp->Y, n, "Y");
-    print_array(temp->Z, n, "Z");
-    print_array(temp->z, n, "z");
+//Blueprint of Global Memory to GPU
 
-    // Special handling for the windows array (2D)
-    printf("windows:\n");
-    for (int i = 0; i < n - m + 1; i++) {
-        for (int j = 0; j < m; j++) {
-            printf("%f ", temp->windows[i * m + j]);
+struct nodeSOA {
+    int *square;
+    double *cube;
+};
+
+// CUDA kernel to compute squares and cubes for all instances
+__global__ void computeKernel(nodeSOA *nodes) {
+    int tid = threadIdx.x;  // Each thread processes one instance
+
+    if (tid < NUM_INSTANCES) {
+        for (int i = 0; i < N; i++) {
+            nodes[tid].square[i] = (tid + 1) * i * i;      // Compute square
+            nodes[tid].cube[i] = (tid + 1) * i * i * i;    // Compute cube
         }
-        printf("\n");
     }
 }
-
 
 int main() {
-    int m = 100;  // Example value for m
-    int n = 1000; // Example value for n
+    nodeSOA *d_nodes;
+    nodeSOA h_nodes[NUM_INSTANCES];
 
-    TempArrays* temp[ROWS];
-    
-    for (int i = 0; i < ROWS; i++){
-       temp[i]=allocate_temp_arrays(QUERY_LENGTH,DATA_SIZE);
-    }
-    
+    // Allocate device memory for nodeSOA instances
+    cudaMalloc(&d_nodes, NUM_INSTANCES * sizeof(nodeSOA));
 
-    for (int i = 0; i < 1; i++){
-        print_temp_arrays(temp[i], QUERY_LENGTH, DATA_SIZE);
-    }
+    // Allocate memory for arrays in each instance on the device
+    for (int i = 0; i < NUM_INSTANCES; i++) {
+        cudaMalloc(&h_nodes[i].square, N * sizeof(int));
+        cudaMalloc(&h_nodes[i].cube, N * sizeof(double));
 
-    for (int i = 0; i < ROWS; i++){
-        free_temp_arrays(temp[i]);
+        // Copy pointers from host instance to device instance
+        cudaMemcpy(&d_nodes[i].square, &h_nodes[i].square, sizeof(int *), cudaMemcpyHostToDevice);
+        cudaMemcpy(&d_nodes[i].cube, &h_nodes[i].cube, sizeof(double *), cudaMemcpyHostToDevice);
     }
 
+    // Launch kernel with one thread per instance
+    computeKernel<<<1, NUM_INSTANCES>>>(d_nodes);
+    cudaDeviceSynchronize();
+
+    // Allocate host memory to retrieve results from the device
+    for (int i = 0; i < NUM_INSTANCES; i++) {
+        int *h_square = (int *)malloc(N * sizeof(int));
+        double *h_cube = (double *)malloc(N * sizeof(double));
+
+        // Copy results from device to host
+        cudaMemcpy(h_square, h_nodes[i].square, N * sizeof(int), cudaMemcpyDeviceToHost);
+        cudaMemcpy(h_cube, h_nodes[i].cube, N * sizeof(double), cudaMemcpyDeviceToHost);
+
+        // Print results
+        printf("Instance %d:\n", i);
+        for (int j = 0; j < N; j++) {
+            printf("Index %d: square = %d, cube = %f\n", j, h_square[j], h_cube[j]);
+        }
+
+        // Free host memory for this instance
+        free(h_square);
+        free(h_cube);
+    }
+
+    // Free allocated memory
+    for (int i = 0; i < NUM_INSTANCES; i++) {
+        cudaFree(h_nodes[i].square);
+        cudaFree(h_nodes[i].cube);
+    }
+    cudaFree(d_nodes);
 
     return 0;
 }
