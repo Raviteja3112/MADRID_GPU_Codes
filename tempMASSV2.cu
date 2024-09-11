@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <cuda_runtime.h>
 
-#define NUM_INSTANCES 2
+#define NUM_INSTANCES 5
 #define N 10
 #define QUERY_LENGTH 4
 #define M_PI 3.14159265358979323846
@@ -20,10 +20,6 @@ struct nodeSOA {
     double *meanx;
     double *sigmax;
     double *y;
-    double *X;
-    double *Y;
-    double *Z;
-    double *z;
     // Temporary arrays for FFT computations
     double *imag_in;
     double *x_real_out;
@@ -64,11 +60,6 @@ void allocateDeviceMemory(struct nodeSOA *h_nodes, struct nodeSOA **d_nodes) {
         CUDA_CHECK(cudaMalloc(&h_nodes[i].meanx, N * sizeof(double)));
         CUDA_CHECK(cudaMalloc(&h_nodes[i].sigmax, N * sizeof(double)));
         CUDA_CHECK(cudaMalloc(&h_nodes[i].y, QUERY_LENGTH * sizeof(double)));
-        CUDA_CHECK(cudaMalloc(&h_nodes[i].X, N * sizeof(double)));
-        CUDA_CHECK(cudaMalloc(&h_nodes[i].Y, N * sizeof(double)));
-        CUDA_CHECK(cudaMalloc(&h_nodes[i].Z, N * sizeof(double)));
-        CUDA_CHECK(cudaMalloc(&h_nodes[i].z, N * sizeof(double)));
-
         // Allocate memory for temporary arrays
         CUDA_CHECK(cudaMalloc(&h_nodes[i].imag_in, N * sizeof(double)));
         CUDA_CHECK(cudaMalloc(&h_nodes[i].x_real_out, N * sizeof(double)));
@@ -98,10 +89,6 @@ void copyHostToDevice(struct nodeSOA *h_nodes, struct nodeSOA *d_nodes) {
         CUDA_CHECK(cudaMemcpy(&d_nodes[i].meanx, &h_nodes[i].meanx, sizeof(double *), cudaMemcpyHostToDevice));
         CUDA_CHECK(cudaMemcpy(&d_nodes[i].sigmax, &h_nodes[i].sigmax, sizeof(double *), cudaMemcpyHostToDevice));
         CUDA_CHECK(cudaMemcpy(&d_nodes[i].y, &h_nodes[i].y, sizeof(double *), cudaMemcpyHostToDevice));
-        CUDA_CHECK(cudaMemcpy(&d_nodes[i].X, &h_nodes[i].X, sizeof(double *), cudaMemcpyHostToDevice));
-        CUDA_CHECK(cudaMemcpy(&d_nodes[i].Y, &h_nodes[i].Y, sizeof(double *), cudaMemcpyHostToDevice));
-        CUDA_CHECK(cudaMemcpy(&d_nodes[i].Z, &h_nodes[i].Z, sizeof(double *), cudaMemcpyHostToDevice));
-        CUDA_CHECK(cudaMemcpy(&d_nodes[i].z, &h_nodes[i].z, sizeof(double *), cudaMemcpyHostToDevice));
 
         // Copy pointers for additional temporary arrays
         CUDA_CHECK(cudaMemcpy(&d_nodes[i].imag_in, &h_nodes[i].imag_in, sizeof(double *), cudaMemcpyHostToDevice));
@@ -131,10 +118,6 @@ void freeDeviceMemory(struct nodeSOA *h_nodes, struct nodeSOA *d_nodes) {
         CUDA_CHECK(cudaFree(h_nodes[i].meanx));
         CUDA_CHECK(cudaFree(h_nodes[i].sigmax));
         CUDA_CHECK(cudaFree(h_nodes[i].y));
-        CUDA_CHECK(cudaFree(h_nodes[i].X));
-        CUDA_CHECK(cudaFree(h_nodes[i].Y));
-        CUDA_CHECK(cudaFree(h_nodes[i].Z));
-        CUDA_CHECK(cudaFree(h_nodes[i].z));
 
         // Free temporary arrays
         CUDA_CHECK(cudaFree(h_nodes[i].imag_in));
@@ -148,20 +131,6 @@ void freeDeviceMemory(struct nodeSOA *h_nodes, struct nodeSOA *d_nodes) {
     }
     // Free the device array of structs
     CUDA_CHECK(cudaFree(d_nodes));
-}
-
-
-// Function to copy results from the device to the host
-void copyResultsToHost(struct nodeSOA *h_nodes, struct nodeSOA *d_nodes, double *h_windows[]) {
-    for (int i = 0; i < NUM_INSTANCES; i++) {
-        h_windows[i] = (double *)malloc(N * sizeof(double));
-        if (h_windows[i] == NULL) {
-            fprintf(stderr, "Host memory allocation failed\n");
-            exit(EXIT_FAILURE);
-        }
-        // Copy results from device to host
-        CUDA_CHECK(cudaMemcpy(h_windows[i], h_nodes[i].windows, N * sizeof(double), cudaMemcpyDeviceToHost));
-    }
 }
 
 
@@ -289,19 +258,12 @@ __global__ void massV2(double *timeSeries,double *query,nodeSOA* nodes,double *d
 
     for (int i = QUERY_LENGTH; i < N; ++i) node.y[i] = 0.0;
 
-    computeFFT(&timeSeries[tid],node.imag_in,node.x_real_out,node.x_imag_out,N);
+    computeFFT(&timeSeries[tid*N],nodes[tid].imag_in,nodes[tid].x_real_out,nodes[tid].x_imag_out,N);
     computeFFT(node.y,node.imag_in,node.y_real_out,node.y_imag_out,N);
     complexMultiply(node.x_real_out, node.x_imag_out, node.y_real_out,node. y_imag_out, node.result_real, node.result_imag,N);
     computeIFFT(node.result_real,node.result_imag,node.ifft_real);
 
-    if(tid==0){
-        printf("inversse fft result: \n");
-        for(int i=0;i<N;i++){
-            printf("%f ",node.ifft_real[i]);
-        }
-        printf("\n");
-    }
-
+    
     int row=tid*(N-QUERY_LENGTH+1);
 
     for (int i = QUERY_LENGTH - 1; i < N; ++i) {
@@ -317,7 +279,6 @@ __global__ void massV2(double *timeSeries,double *query,nodeSOA* nodes,double *d
 
     for (int i = 0; i <= N - QUERY_LENGTH; ++i) {
         distances[row+i] = sqrt(distances[row+i]);
-        // printf("%d %d %f",tid,i,distances[row+i]);
     }
 
 }
@@ -328,7 +289,10 @@ __global__ void massV2(double *timeSeries,double *query,nodeSOA* nodes,double *d
 int main() {
     double h_array[NUM_INSTANCES][N] = {
         {1.0, 21.0, 43.0, 45.0, 15.0, 86.0, 75.0, 8.0, 9.0, 10.0},
-        {145.6, 892.3, 234.8, 678.9, 102.5, 743.1, 399.7, 508.2, 926.4, 314.7}
+        {145.6, 892.3, 234.8, 678.9, 102.5, 743.1, 399.7, 508.2, 926.4, 314.7},
+        {823.4, 271.9, 459.6, 619.2, 354.8, 967.3, 785.1, 432.6, 573.8, 184.5},
+        {2.4, 9.7, 72.5, 2.3, 4.1, 9.6, 7.8, 15.2, 46.9, 74.3},
+        {48.5, 12.3, 59.7, 27.1, 93.8, 305.6, 487.4, 76.2, 95.1, 18.4}
     };
     double *d_array;
     size_t array_size = NUM_INSTANCES * N * sizeof(double);
