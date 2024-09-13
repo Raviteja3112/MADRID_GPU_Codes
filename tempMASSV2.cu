@@ -7,6 +7,7 @@
 #define QUERY_LENGTH 4
 #define M_PI 3.14159265358979323846
 
+//This is in the Branch of DAMP_GPU which is Subbranch 
 struct nodeSOA {
     double *x_less_than_m;
     double *divider;
