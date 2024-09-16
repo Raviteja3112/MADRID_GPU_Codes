@@ -380,12 +380,12 @@ __global__ void DAMP(double *timeSeries,int subSequent_m_start,int location_to_s
 
 void printResults(struct nodeSOA *h_nodes) {
     for (int i = 0; i < NUM_INSTANCES; i++) {
-        double *h_distances = (double *)malloc(TIME_SERIES_SIZE * sizeof(double));
+        // double *h_distances = (double *)malloc(TIME_SERIES_SIZE * sizeof(double));
         int *h_location = (int *)malloc(sizeof(int)); // Allocate memory for location
         double *h_bsfScore = (double *)malloc(sizeof(double)); // Allocate memory for bsfScore
 
         // Copy results from device to host
-        cudaMemcpy(h_distances, h_nodes[i].distances_DAMP, TIME_SERIES_SIZE * sizeof(double), cudaMemcpyDeviceToHost);
+        // cudaMemcpy(h_distances, h_nodes[i].distances_DAMP, TIME_SERIES_SIZE * sizeof(double), cudaMemcpyDeviceToHost);
         cudaMemcpy(h_location, h_nodes[i].location, sizeof(int), cudaMemcpyDeviceToHost);
         cudaMemcpy(h_bsfScore, h_nodes[i].bsfScore, sizeof(double), cudaMemcpyDeviceToHost);
 
@@ -397,7 +397,7 @@ void printResults(struct nodeSOA *h_nodes) {
         printf("Location: %d, bsfScore: %f\n", *h_location, *h_bsfScore);
 
         // Free host memory for this instance
-        free(h_distances);
+        // free(h_distances);
         free(h_location);
         free(h_bsfScore);
     }
